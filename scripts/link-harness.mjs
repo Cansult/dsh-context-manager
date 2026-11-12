@@ -1,9 +1,23 @@
 /** Link already-built sibling packages for offline development; never write to the Harness. */
-import { readFile, mkdir, symlink, lstat } from 'node:fs/promises'
+import { readFile, mkdir, symlink, lstat, readlink, rm } from 'node:fs/promises'
 import { resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const harness = resolve(process.argv[2] ?? resolve(root, '../../deepseek-harness'))
+async function link(source, destination) {
+  await mkdir(dirname(destination), { recursive: true })
+  try {
+    const stats = await lstat(destination)
+    if (stats.isSymbolicLink() && resolve(dirname(destination), await readlink(destination)) === source) {
+      console.log(`Keep existing ${destination}`)
+      return
+    }
+    // Replace a stale link, or a real copy left by `npm install`, so `tsc` cannot crawl package sources.
+    await rm(destination, { recursive: true, force: true })
+    console.log(`Replace stale ${destination}`)
+  } catch (error) { if (error.code !== 'ENOENT') throw error }
+  await symlink(source, destination, 'dir')
+}
 const locations = {
   '@deepseek-ai/cordis': 'vendor/cordis', '@deepseek-ai/schemastery': 'vendor/schemastery',
   '@deepseek-ai/dsh-agent': 'packages/core/agent', '@deepseek-ai/dsh-commands': 'packages/interaction/commands',
@@ -21,11 +35,7 @@ for (const [name, location] of Object.entries(locations)) {
   const destination = resolve(root, 'node_modules', name)
   const source = resolve(harness, location)
   await readFile(resolve(source, 'package.json'), 'utf8')
-  await mkdir(dirname(destination), { recursive: true })
-  try { await lstat(destination); console.log(`Keep existing ${destination}`) }
-  catch (error) { if (error.code !== 'ENOENT') throw error; await symlink(source, destination, 'dir') }
+  await link(source, resolve(root, 'node_modules', name))
 }
-await mkdir(resolve(root, 'node_modules/.bin'), { recursive: true })
-const bin = resolve(root, 'node_modules/.bin/tsc')
-try { await lstat(bin) } catch (error) { if (error.code !== 'ENOENT') throw error; await symlink(resolve(harness, 'node_modules/typescript/bin/tsc'), bin) }
+await link(resolve(harness, 'node_modules/typescript/bin/tsc'), resolve(root, 'node_modules/.bin/tsc'))
 console.log(`Linked development dependencies from ${harness}; Harness files unchanged.`)
