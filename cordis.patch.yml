@@ -1,0 +1,5 @@
+- insert:
+    - id: context-manager
+      name: dsh-context-manager
+    - id: context-manager-commands
+      name: dsh-context-manager/commands
